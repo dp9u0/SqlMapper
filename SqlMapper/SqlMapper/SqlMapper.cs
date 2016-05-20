@@ -1,18 +1,13 @@
-﻿/*
- License: http://www.apache.org/licenses/LICENSE-2.0 
- Home page: http://code.google.com/p/dapper-dot-net/
- Note: to build on C# 3.0 + .NET 3.5, include the CSHARP30 compiler symbol (and yes,
- I know the difference between language and runtime versions; this is a compromise).
- */
-
-#region Using
+﻿#region
 
 using System;
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
 using System.Data.SqlClient;
+using System.Dynamic;
 using System.Globalization;
 using System.Linq;
 using System.Linq.Expressions;
@@ -181,8 +176,12 @@ namespace Dapper {
                                  CommandType? commandType,
                                  CommandFlags flags)
 #else
-        public CommandDefinition(string commandText, object parameters = null, IDbTransaction transaction = null, int? commandTimeout = null,
-            CommandType? commandType = null, CommandFlags flags = CommandFlags.Buffered
+        public CommandDefinition(string commandText,
+                                 object parameters = null,
+                                 IDbTransaction transaction = null,
+                                 int? commandTimeout = null,
+                                 CommandType? commandType = null,
+                                 CommandFlags flags = CommandFlags.Buffered
 #if ASYNC
             , CancellationToken cancellationToken = default(CancellationToken)
 #endif
@@ -720,45 +719,36 @@ namespace Dapper {
             OnQueryCachePurged();
         }
 #else
-        static readonly System.Collections.Concurrent.ConcurrentDictionary<Identity, CacheInfo> _queryCache = new System.Collections.Concurrent.ConcurrentDictionary<Identity, CacheInfo>();
-        
-        private static void SetQueryCache(Identity key, CacheInfo value)
-        {
-            if (Interlocked.Increment(ref collect) == COLLECT_PER_ITEMS)
-            {
+        static readonly ConcurrentDictionary<Identity, CacheInfo> _queryCache =
+            new ConcurrentDictionary<Identity, CacheInfo>();
+
+        private static void SetQueryCache(Identity key, CacheInfo value) {
+            if (Interlocked.Increment(ref collect) == COLLECT_PER_ITEMS) {
                 CollectCacheGarbage();
             }
             _queryCache[key] = value;
         }
 
-        private static void CollectCacheGarbage()
-        {
-            try
-            {
-                foreach (var pair in _queryCache)
-                {
-                    if (pair.Value.GetHitCount() <= COLLECT_HIT_COUNT_MIN)
-                    {
+        private static void CollectCacheGarbage() {
+            try {
+                foreach (var pair in _queryCache) {
+                    if (pair.Value.GetHitCount() <= COLLECT_HIT_COUNT_MIN) {
                         CacheInfo cache;
                         _queryCache.TryRemove(pair.Key, out cache);
                     }
                 }
             }
 
-
-            finally
-            {
+            finally {
                 Interlocked.Exchange(ref collect, 0);
             }
         }
 
-
         private const int COLLECT_PER_ITEMS = 1000, COLLECT_HIT_COUNT_MIN = 0;
         private static int collect;
-        private static bool TryGetQueryCache(Identity key, out CacheInfo value)
-        {
-            if (_queryCache.TryGetValue(key, out value))
-            {
+
+        private static bool TryGetQueryCache(Identity key, out CacheInfo value) {
+            if (_queryCache.TryGetValue(key, out value)) {
                 value.RecordHit();
                 return true;
             }
@@ -766,74 +756,65 @@ namespace Dapper {
             return false;
         }
 
-
         /// <summary>
         /// Purge the query cache 
         /// </summary>
-        public static void PurgeQueryCache()
-        {
+        public static void PurgeQueryCache() {
             _queryCache.Clear();
             OnQueryCachePurged();
         }
 
-
-        private static void PurgeQueryCacheByType(Type type)
-        {
-            foreach (var entry in _queryCache)
-            {
+        private static void PurgeQueryCacheByType(Type type) {
+            foreach (var entry in _queryCache) {
                 CacheInfo cache;
-                if (entry.Key.type == type)
+                if (entry.Key.type == type) {
                     _queryCache.TryRemove(entry.Key, out cache);
+                }
             }
         }
-
 
         /// <summary>
         /// Return a count of all the cached queries by dapper
         /// </summary>
         /// <returns></returns>
-        public static int GetCachedSQLCount()
-        {
+        public static int GetCachedSQLCount() {
             return _queryCache.Count;
         }
-
 
         /// <summary>
         /// Return a list of all the queries cached by dapper
         /// </summary>
         /// <param name="ignoreHitCountAbove"></param>
         /// <returns></returns>
-        public static IEnumerable<Tuple<string, string, int>> GetCachedSQL(int ignoreHitCountAbove = int.MaxValue)
-        {
-            var data = _queryCache.Select(pair => Tuple.Create(pair.Key.connectionString, pair.Key.sql, pair.Value.GetHitCount()));
-            if (ignoreHitCountAbove < int.MaxValue) data = data.Where(tuple => tuple.Item3 <= ignoreHitCountAbove);
+        public static IEnumerable<Tuple<string, string, int>> GetCachedSQL(int ignoreHitCountAbove = int.MaxValue) {
+            var data =
+                _queryCache.Select(
+                                   pair =>
+                                       Tuple.Create(pair.Key.connectionString, pair.Key.sql, pair.Value.GetHitCount()));
+            if (ignoreHitCountAbove < int.MaxValue) {
+                data = data.Where(tuple => tuple.Item3 <= ignoreHitCountAbove);
+            }
             return data;
         }
-
 
         /// <summary>
         /// Deep diagnostics only: find any hash collisions in the cache
         /// </summary>
         /// <returns></returns>
-        public static IEnumerable<Tuple<int, int>> GetHashCollissions()
-        {
+        public static IEnumerable<Tuple<int, int>> GetHashCollissions() {
             var counts = new Dictionary<int, int>();
-            foreach (var key in _queryCache.Keys)
-            {
+            foreach (var key in _queryCache.Keys) {
                 int count;
-                if (!counts.TryGetValue(key.hashCode, out count))
-                {
+                if (!counts.TryGetValue(key.hashCode, out count)) {
                     counts.Add(key.hashCode, 1);
                 }
-                else
-                {
+                else {
                     counts[key.hashCode] = count + 1;
                 }
             }
             return from pair in counts
                    where pair.Value > 1
                    select Tuple.Create(pair.Key, pair.Value);
-
 
         }
 #endif
@@ -1210,10 +1191,10 @@ namespace Dapper {
         }
 
 #if CSHARP30
-        /// <summary>
-        /// Execute parameterized SQL  
-        /// </summary>
-        /// <returns>Number of rows affected</returns>
+    /// <summary>
+    /// Execute parameterized SQL  
+    /// </summary>
+    /// <returns>Number of rows affected</returns>
         public static int Execute(this IDbConnection cnn, string sql, object param) {
             return Execute(cnn, sql, param, null, null, null);
         }
@@ -1377,7 +1358,12 @@ namespace Dapper {
             int? commandTimeout,
             CommandType? commandType
 #else
-this IDbConnection cnn, string sql, object param = null, IDbTransaction transaction = null, int? commandTimeout = null, CommandType? commandType = null
+            this IDbConnection cnn,
+            string sql,
+            object param = null,
+            IDbTransaction transaction = null,
+            int? commandTimeout = null,
+            CommandType? commandType = null
 #endif
             ) {
             CommandDefinition command = new CommandDefinition(sql, param, transaction, commandTimeout, commandType,
@@ -1406,7 +1392,12 @@ this IDbConnection cnn, string sql, object param = null, IDbTransaction transact
             int? commandTimeout,
             CommandType? commandType
 #else
-this IDbConnection cnn, string sql, object param = null, IDbTransaction transaction = null, int? commandTimeout = null, CommandType? commandType = null
+            this IDbConnection cnn,
+            string sql,
+            object param = null,
+            IDbTransaction transaction = null,
+            int? commandTimeout = null,
+            CommandType? commandType = null
 #endif
             ) {
             CommandDefinition command = new CommandDefinition(sql, (object) param, transaction, commandTimeout,
@@ -1427,7 +1418,12 @@ this IDbConnection cnn, string sql, object param = null, IDbTransaction transact
             int? commandTimeout,
             CommandType? commandType
 #else
-this IDbConnection cnn, string sql, object param = null, IDbTransaction transaction = null, int? commandTimeout = null, CommandType? commandType = null
+            this IDbConnection cnn,
+            string sql,
+            object param = null,
+            IDbTransaction transaction = null,
+            int? commandTimeout = null,
+            CommandType? commandType = null
 #endif
             ) {
             CommandDefinition command = new CommandDefinition(sql, (object) param, transaction, commandTimeout,
@@ -1541,7 +1537,12 @@ this IDbConnection cnn, string sql, object param = null, IDbTransaction transact
             int? commandTimeout,
             CommandType? commandType
 #else
-this IDbConnection cnn, string sql, object param = null, IDbTransaction transaction = null, int? commandTimeout = null, CommandType? commandType = null
+            this IDbConnection cnn,
+            string sql,
+            object param = null,
+            IDbTransaction transaction = null,
+            int? commandTimeout = null,
+            CommandType? commandType = null
 #endif
             ) {
             CommandDefinition command = new CommandDefinition(sql, (object) param, transaction, commandTimeout,
@@ -1582,18 +1583,23 @@ this IDbConnection cnn, string sql, object param = null, IDbTransaction transact
         }
 
 #if !CSHARP30
-    /// <summary>
-    /// Return a list of dynamic objects, reader is closed after the call
-    /// </summary>
-    /// <remarks>Note: each row can be accessed via "dynamic", or by casting to an IDictionary<string,object></remarks>
-        public static IEnumerable<dynamic> Query(this IDbConnection cnn, string sql, object param = null, IDbTransaction transaction = null, bool buffered = true, int? commandTimeout = null, CommandType? commandType = null)
-        {
-            return Query<DapperRow>(cnn, sql, param as object, transaction, buffered, commandTimeout, commandType);
-        }
-#else
         /// <summary>
         /// Return a list of dynamic objects, reader is closed after the call
         /// </summary>
+        /// <remarks>Note: each row can be accessed via "dynamic", or by casting to an IDictionary<string,object></remarks>
+        public static IEnumerable<dynamic> Query(this IDbConnection cnn,
+                                                 string sql,
+                                                 object param = null,
+                                                 IDbTransaction transaction = null,
+                                                 bool buffered = true,
+                                                 int? commandTimeout = null,
+                                                 CommandType? commandType = null) {
+            return Query<DapperRow>(cnn, sql, param as object, transaction, buffered, commandTimeout, commandType);
+        }
+#else
+    /// <summary>
+    /// Return a list of dynamic objects, reader is closed after the call
+    /// </summary>
         public static IEnumerable<IDictionary<string, object>> Query(this IDbConnection cnn, string sql, object param) {
             return Query(cnn, sql, param, null, true, null, null);
         }
@@ -1661,7 +1667,13 @@ this IDbConnection cnn, string sql, object param = null, IDbTransaction transact
             int? commandTimeout,
             CommandType? commandType
 #else
-this IDbConnection cnn, string sql, object param = null, IDbTransaction transaction = null, bool buffered = true, int? commandTimeout = null, CommandType? commandType = null
+            this IDbConnection cnn,
+            string sql,
+            object param = null,
+            IDbTransaction transaction = null,
+            bool buffered = true,
+            int? commandTimeout = null,
+            CommandType? commandType = null
 #endif
             ) {
             CommandDefinition command = new CommandDefinition(sql, (object) param, transaction, commandTimeout,
@@ -1687,7 +1699,14 @@ this IDbConnection cnn, string sql, object param = null, IDbTransaction transact
             int? commandTimeout,
             CommandType? commandType
 #else
-this IDbConnection cnn, Type type, string sql, object param = null, IDbTransaction transaction = null, bool buffered = true, int? commandTimeout = null, CommandType? commandType = null
+            this IDbConnection cnn,
+            Type type,
+            string sql,
+            object param = null,
+            IDbTransaction transaction = null,
+            bool buffered = true,
+            int? commandTimeout = null,
+            CommandType? commandType = null
 #endif
             ) {
             if (type == null) {
@@ -1723,7 +1742,12 @@ this IDbConnection cnn, Type type, string sql, object param = null, IDbTransacti
             int? commandTimeout,
             CommandType? commandType
 #else
-            this IDbConnection cnn, string sql, object param = null, IDbTransaction transaction = null, int? commandTimeout = null, CommandType? commandType = null
+            this IDbConnection cnn,
+            string sql,
+            object param = null,
+            IDbTransaction transaction = null,
+            int? commandTimeout = null,
+            CommandType? commandType = null
 #endif
             ) {
             CommandDefinition command = new CommandDefinition(sql, (object) param, transaction, commandTimeout,
@@ -1895,7 +1919,15 @@ this IDbConnection cnn, Type type, string sql, object param = null, IDbTransacti
             int? commandTimeout,
             CommandType? commandType
 #else
-this IDbConnection cnn, string sql, Func<TFirst, TSecond, TReturn> map, object param = null, IDbTransaction transaction = null, bool buffered = true, string splitOn = "Id", int? commandTimeout = null, CommandType? commandType = null
+            this IDbConnection cnn,
+            string sql,
+            Func<TFirst, TSecond, TReturn> map,
+            object param = null,
+            IDbTransaction transaction = null,
+            bool buffered = true,
+            string splitOn = "Id",
+            int? commandTimeout = null,
+            CommandType? commandType = null
 #endif
             ) {
             return MultiMap<TFirst, TSecond, DontMap, DontMap, DontMap, DontMap, DontMap, TReturn>(cnn, sql, map,
@@ -1931,7 +1963,15 @@ this IDbConnection cnn, string sql, Func<TFirst, TSecond, TReturn> map, object p
             int? commandTimeout,
             CommandType? commandType
 #else
-this IDbConnection cnn, string sql, Func<TFirst, TSecond, TThird, TReturn> map, object param = null, IDbTransaction transaction = null, bool buffered = true, string splitOn = "Id", int? commandTimeout = null, CommandType? commandType = null
+            this IDbConnection cnn,
+            string sql,
+            Func<TFirst, TSecond, TThird, TReturn> map,
+            object param = null,
+            IDbTransaction transaction = null,
+            bool buffered = true,
+            string splitOn = "Id",
+            int? commandTimeout = null,
+            CommandType? commandType = null
 #endif
             ) {
             return MultiMap<TFirst, TSecond, TThird, DontMap, DontMap, DontMap, DontMap, TReturn>(cnn, sql, map,
@@ -1968,7 +2008,15 @@ this IDbConnection cnn, string sql, Func<TFirst, TSecond, TThird, TReturn> map, 
             int? commandTimeout,
             CommandType? commandType
 #else
-this IDbConnection cnn, string sql, Func<TFirst, TSecond, TThird, TFourth, TReturn> map, object param = null, IDbTransaction transaction = null, bool buffered = true, string splitOn = "Id", int? commandTimeout = null, CommandType? commandType = null
+            this IDbConnection cnn,
+            string sql,
+            Func<TFirst, TSecond, TThird, TFourth, TReturn> map,
+            object param = null,
+            IDbTransaction transaction = null,
+            bool buffered = true,
+            string splitOn = "Id",
+            int? commandTimeout = null,
+            CommandType? commandType = null
 #endif
             ) {
             return MultiMap<TFirst, TSecond, TThird, TFourth, DontMap, DontMap, DontMap, TReturn>(cnn, sql, map,
@@ -1976,32 +2024,39 @@ this IDbConnection cnn, string sql, Func<TFirst, TSecond, TThird, TFourth, TRetu
         }
 
 #if !CSHARP30
-    /// <summary>
-    /// Perform a multi mapping query with 5 input parameters
-    /// </summary>
-    /// <typeparam name="TFirst"></typeparam>
-    /// <typeparam name="TSecond"></typeparam>
-    /// <typeparam name="TThird"></typeparam>
-    /// <typeparam name="TFourth"></typeparam>
-    /// <typeparam name="TFifth"></typeparam>
-    /// <typeparam name="TReturn"></typeparam>
-    /// <param name="cnn"></param>
-    /// <param name="sql"></param>
-    /// <param name="map"></param>
-    /// <param name="param"></param>
-    /// <param name="transaction"></param>
-    /// <param name="buffered"></param>
-    /// <param name="splitOn"></param>
-    /// <param name="commandTimeout"></param>
-    /// <param name="commandType"></param>
-    /// <returns></returns>
+        /// <summary>
+        /// Perform a multi mapping query with 5 input parameters
+        /// </summary>
+        /// <typeparam name="TFirst"></typeparam>
+        /// <typeparam name="TSecond"></typeparam>
+        /// <typeparam name="TThird"></typeparam>
+        /// <typeparam name="TFourth"></typeparam>
+        /// <typeparam name="TFifth"></typeparam>
+        /// <typeparam name="TReturn"></typeparam>
+        /// <param name="cnn"></param>
+        /// <param name="sql"></param>
+        /// <param name="map"></param>
+        /// <param name="param"></param>
+        /// <param name="transaction"></param>
+        /// <param name="buffered"></param>
+        /// <param name="splitOn"></param>
+        /// <param name="commandTimeout"></param>
+        /// <param name="commandType"></param>
+        /// <returns></returns>
         public static IEnumerable<TReturn> Query<TFirst, TSecond, TThird, TFourth, TFifth, TReturn>(
-            this IDbConnection cnn, string sql, Func<TFirst, TSecond, TThird, TFourth, TFifth, TReturn> map, object param = null, IDbTransaction transaction = null, bool buffered = true, string splitOn = "Id", int? commandTimeout = null, CommandType? commandType = null
-)
-        {
-            return MultiMap<TFirst, TSecond, TThird, TFourth, TFifth, DontMap, DontMap, TReturn>(cnn, sql, map, param as object, transaction, buffered, splitOn, commandTimeout, commandType);
+            this IDbConnection cnn,
+            string sql,
+            Func<TFirst, TSecond, TThird, TFourth, TFifth, TReturn> map,
+            object param = null,
+            IDbTransaction transaction = null,
+            bool buffered = true,
+            string splitOn = "Id",
+            int? commandTimeout = null,
+            CommandType? commandType = null
+            ) {
+            return MultiMap<TFirst, TSecond, TThird, TFourth, TFifth, DontMap, DontMap, TReturn>(cnn, sql, map,
+                param as object, transaction, buffered, splitOn, commandTimeout, commandType);
         }
-
 
         /// <summary>
         /// Perform a multi mapping query with 6 input parameters
@@ -2024,14 +2079,19 @@ this IDbConnection cnn, string sql, Func<TFirst, TSecond, TThird, TFourth, TRetu
         /// <param name="commandType"></param>
         /// <returns></returns>
         public static IEnumerable<TReturn> Query<TFirst, TSecond, TThird, TFourth, TFifth, TSixth, TReturn>(
-            this IDbConnection cnn, string sql, Func<TFirst, TSecond, TThird, TFourth, TFifth, TSixth, TReturn> map, object param = null, IDbTransaction transaction = null, bool buffered = true, string splitOn = "Id", int? commandTimeout = null, CommandType? commandType = null
-)
-        {
-            return MultiMap<TFirst, TSecond, TThird, TFourth, TFifth, TSixth, DontMap, TReturn>(cnn, sql, map, param as object, transaction, buffered, splitOn, commandTimeout, commandType);
+            this IDbConnection cnn,
+            string sql,
+            Func<TFirst, TSecond, TThird, TFourth, TFifth, TSixth, TReturn> map,
+            object param = null,
+            IDbTransaction transaction = null,
+            bool buffered = true,
+            string splitOn = "Id",
+            int? commandTimeout = null,
+            CommandType? commandType = null
+            ) {
+            return MultiMap<TFirst, TSecond, TThird, TFourth, TFifth, TSixth, DontMap, TReturn>(cnn, sql, map,
+                param as object, transaction, buffered, splitOn, commandTimeout, commandType);
         }
-
-
-
 
         /// <summary>
         /// Perform a multi mapping query with 7 input parameters
@@ -2054,11 +2114,19 @@ this IDbConnection cnn, string sql, Func<TFirst, TSecond, TThird, TFourth, TRetu
         /// <param name="commandTimeout"></param>
         /// <param name="commandType"></param>
         /// <returns></returns>
-        public static IEnumerable<TReturn> Query<TFirst, TSecond, TThird, TFourth, TFifth, TSixth, TSeventh, TReturn>(this IDbConnection cnn, string sql, Func<TFirst, TSecond, TThird, TFourth, TFifth, TSixth, TSeventh, TReturn> map, object param = null, IDbTransaction transaction = null, bool buffered = true, string splitOn = "Id", int? commandTimeout = null, CommandType? commandType = null)
-        {
-            return MultiMap<TFirst, TSecond, TThird, TFourth, TFifth, TSixth, TSeventh, TReturn>(cnn, sql, map, param as object, transaction, buffered, splitOn, commandTimeout, commandType);
+        public static IEnumerable<TReturn> Query<TFirst, TSecond, TThird, TFourth, TFifth, TSixth, TSeventh, TReturn>(
+            this IDbConnection cnn,
+            string sql,
+            Func<TFirst, TSecond, TThird, TFourth, TFifth, TSixth, TSeventh, TReturn> map,
+            object param = null,
+            IDbTransaction transaction = null,
+            bool buffered = true,
+            string splitOn = "Id",
+            int? commandTimeout = null,
+            CommandType? commandType = null) {
+            return MultiMap<TFirst, TSecond, TThird, TFourth, TFifth, TSixth, TSeventh, TReturn>(cnn, sql, map,
+                param as object, transaction, buffered, splitOn, commandTimeout, commandType);
         }
-
 
         /// <summary>
         /// Perform a multi mapping query with arbitrary input parameters
@@ -2075,9 +2143,18 @@ this IDbConnection cnn, string sql, Func<TFirst, TSecond, TThird, TFourth, TRetu
         /// <param name="commandTimeout">Number of seconds before command execution timeout</param>
         /// <param name="commandType">Is it a stored proc or a batch?</param>
         /// <returns></returns>
-        public static IEnumerable<TReturn> Query<TReturn>(this IDbConnection cnn, string sql, Type[] types, Func<object[], TReturn> map, dynamic param = null, IDbTransaction transaction = null, bool buffered = true, string splitOn = "Id", int? commandTimeout = null, CommandType? commandType = null)
-        {
-            var command = new CommandDefinition(sql, (object)param, transaction, commandTimeout, commandType, buffered ? CommandFlags.Buffered : CommandFlags.None);
+        public static IEnumerable<TReturn> Query<TReturn>(this IDbConnection cnn,
+                                                          string sql,
+                                                          Type[] types,
+                                                          Func<object[], TReturn> map,
+                                                          dynamic param = null,
+                                                          IDbTransaction transaction = null,
+                                                          bool buffered = true,
+                                                          string splitOn = "Id",
+                                                          int? commandTimeout = null,
+                                                          CommandType? commandType = null) {
+            var command = new CommandDefinition(sql, (object) param, transaction, commandTimeout, commandType,
+                buffered ? CommandFlags.Buffered : CommandFlags.None);
             var results = MultiMapImpl<TReturn>(cnn, command, types, map, splitOn, null, null, true);
             return buffered ? results.ToList() : results;
         }
@@ -2288,11 +2365,30 @@ this IDbConnection cnn, string sql, Func<TFirst, TSecond, TThird, TFourth, TRetu
                                 (TFourth) otherDeserializers[2](r));
 #if !CSHARP30
                 case 4:
-                    return r => ((Func<TFirst, TSecond, TThird, TFourth, TFifth, TReturn>)map)((TFirst)deserializer(r), (TSecond)otherDeserializers[0](r), (TThird)otherDeserializers[1](r), (TFourth)otherDeserializers[2](r), (TFifth)otherDeserializers[3](r));
+                    return
+                        r =>
+                            ((Func<TFirst, TSecond, TThird, TFourth, TFifth, TReturn>) map)((TFirst) deserializer(r),
+                                (TSecond) otherDeserializers[0](r), (TThird) otherDeserializers[1](r),
+                                (TFourth) otherDeserializers[2](r), (TFifth) otherDeserializers[3](r));
                 case 5:
-                    return r => ((Func<TFirst, TSecond, TThird, TFourth, TFifth, TSixth, TReturn>)map)((TFirst)deserializer(r), (TSecond)otherDeserializers[0](r), (TThird)otherDeserializers[1](r), (TFourth)otherDeserializers[2](r), (TFifth)otherDeserializers[3](r), (TSixth)otherDeserializers[4](r));
+                    return
+                        r =>
+                            ((Func<TFirst, TSecond, TThird, TFourth, TFifth, TSixth, TReturn>) map)(
+                                                                                                    (TFirst)
+                                                                                                        deserializer(r),
+                                (TSecond) otherDeserializers[0](r), (TThird) otherDeserializers[1](r),
+                                (TFourth) otherDeserializers[2](r), (TFifth) otherDeserializers[3](r),
+                                (TSixth) otherDeserializers[4](r));
                 case 6:
-                    return r => ((Func<TFirst, TSecond, TThird, TFourth, TFifth, TSixth, TSeventh, TReturn>)map)((TFirst)deserializer(r), (TSecond)otherDeserializers[0](r), (TThird)otherDeserializers[1](r), (TFourth)otherDeserializers[2](r), (TFifth)otherDeserializers[3](r), (TSixth)otherDeserializers[4](r), (TSeventh)otherDeserializers[5](r));
+                    return
+                        r =>
+                            ((Func<TFirst, TSecond, TThird, TFourth, TFifth, TSixth, TSeventh, TReturn>) map)(
+                                                                                                              (TFirst)
+                                                                                                                  deserializer
+                                                                                                                      (r),
+                                (TSecond) otherDeserializers[0](r), (TThird) otherDeserializers[1](r),
+                                (TFourth) otherDeserializers[2](r), (TFifth) otherDeserializers[3](r),
+                                (TSixth) otherDeserializers[4](r), (TSeventh) otherDeserializers[5](r));
 #endif
                 default:
                     throw new NotSupportedException();
@@ -2321,7 +2417,7 @@ this IDbConnection cnn, string sql, Func<TFirst, TSecond, TThird, TFourth, TRetu
             List<Func<IDataReader, object>> deserializers = new List<Func<IDataReader, object>>();
             string[] splits = splitOn.Split(',').Select(s => s.Trim()).ToArray();
             bool isMultiSplit = splits.Length > 1;
-            if (types.First() == typeof (Object)) {
+            if (types.First() == typeof (object)) {
                 // we go left to right for dynamic multi-mapping so that the madness of TestMultiMappingVariations
                 // is supported
                 bool first = true;
@@ -2473,7 +2569,7 @@ this IDbConnection cnn, string sql, Func<TFirst, TSecond, TThird, TFourth, TRetu
                     if (firstMatch) {
                         firstMatch = false;
                         cmd.Parameters.Clear();
-                            // only clear if we are pretty positive that we've found this pattern successfully
+                        // only clear if we are pretty positive that we've found this pattern successfully
                     }
                     // if found, return the anonymous token "?"
                     cmd.Parameters.Add(param);
@@ -2494,10 +2590,9 @@ this IDbConnection cnn, string sql, Func<TFirst, TSecond, TThird, TFourth, TRetu
                                                                  int length,
                                                                  bool returnNullIfFirstMissing) {
 #if !CSHARP30
-    // dynamic is passed in as Object ... by c# design
-            if (type == typeof(object)
-                || type == typeof(DapperRow))
-            {
+            // dynamic is passed in as Object ... by c# design
+            if (type == typeof (object)
+                || type == typeof (DapperRow)) {
                 return GetDapperRowDeserializer(reader, startBound, length, returnNullIfFirstMissing);
             }
 #else
@@ -2524,378 +2619,353 @@ this IDbConnection cnn, string sql, Func<TFirst, TSecond, TThird, TFourth, TRetu
         }
 
 #if !CSHARP30
-        private sealed partial class DapperTable
-        {
-            string[] fieldNames;
+        private sealed partial class DapperTable {
+
             readonly Dictionary<string, int> fieldNameLookup;
+            string[] fieldNames;
 
-
-            internal string[] FieldNames { get { return fieldNames; } }
-
-
-            public DapperTable(string[] fieldNames)
-            {
-                if (fieldNames == null) throw new ArgumentNullException("fieldNames");
+            public DapperTable(string[] fieldNames) {
+                if (fieldNames == null) {
+                    throw new ArgumentNullException("fieldNames");
+                }
                 this.fieldNames = fieldNames;
-
 
                 fieldNameLookup = new Dictionary<string, int>(fieldNames.Length, StringComparer.Ordinal);
                 // if there are dups, we want the **first** key to be the "winner" - so iterate backwards
-                for (int i = fieldNames.Length - 1; i >= 0; i--)
-                {
+                for (int i = fieldNames.Length - 1; i >= 0; i--) {
                     string key = fieldNames[i];
-                    if (key != null) fieldNameLookup[key] = i;
+                    if (key != null) {
+                        fieldNameLookup[key] = i;
+                    }
                 }
             }
 
+            internal string[] FieldNames {
+                get {
+                    return fieldNames;
+                }
+            }
 
-            internal int IndexOfName(string name)
-            {
+            public int FieldCount {
+                get {
+                    return fieldNames.Length;
+                }
+            }
+
+            internal int IndexOfName(string name) {
                 int result;
                 return (name != null && fieldNameLookup.TryGetValue(name, out result)) ? result : -1;
             }
-            internal int AddField(string name)
-            {
-                if (name == null) throw new ArgumentNullException("name");
-                if (fieldNameLookup.ContainsKey(name)) throw new InvalidOperationException("Field already exists: " + name);
+
+            internal int AddField(string name) {
+                if (name == null) {
+                    throw new ArgumentNullException("name");
+                }
+                if (fieldNameLookup.ContainsKey(name)) {
+                    throw new InvalidOperationException("Field already exists: " + name);
+                }
                 int oldLen = fieldNames.Length;
-                Array.Resize(ref fieldNames, oldLen + 1); // yes, this is sub-optimal, but this is not the expected common case
+                Array.Resize(ref fieldNames, oldLen + 1);
+                    // yes, this is sub-optimal, but this is not the expected common case
                 fieldNames[oldLen] = name;
                 fieldNameLookup[name] = oldLen;
                 return oldLen;
             }
 
-
-
-
-            internal bool FieldExists(string key)
-            {
+            internal bool FieldExists(string key) {
                 return key != null && fieldNameLookup.ContainsKey(key);
             }
 
-
-            public int FieldCount { get { return fieldNames.Length; } }
         }
 
+        sealed partial class DapperRowMetaObject : DynamicMetaObject {
 
-        sealed partial class DapperRowMetaObject : System.Dynamic.DynamicMetaObject
-        {
-            static readonly MethodInfo getValueMethod = typeof(IDictionary<string, object>).GetProperty("Item").GetGetMethod();
-            static readonly MethodInfo setValueMethod = typeof(DapperRow).GetMethod("SetValue", new Type[] { typeof(string), typeof(object) });
+            static readonly MethodInfo getValueMethod =
+                typeof (IDictionary<string, object>).GetProperty("Item").GetGetMethod();
 
+            static readonly MethodInfo setValueMethod = typeof (DapperRow).GetMethod("SetValue", new Type[] {
+                typeof (string), typeof (object)
+            });
 
             public DapperRowMetaObject(
-                System.Linq.Expressions.Expression expression,
-                System.Dynamic.BindingRestrictions restrictions
+                Expression expression,
+                BindingRestrictions restrictions
                 )
-                : base(expression, restrictions)
-            {
+                : base(expression, restrictions) {
             }
 
-
             public DapperRowMetaObject(
-                System.Linq.Expressions.Expression expression,
-                System.Dynamic.BindingRestrictions restrictions,
+                Expression expression,
+                BindingRestrictions restrictions,
                 object value
                 )
-                : base(expression, restrictions, value)
-            {
+                : base(expression, restrictions, value) {
             }
 
-
-            System.Dynamic.DynamicMetaObject CallMethod(
+            DynamicMetaObject CallMethod(
                 MethodInfo method,
-                System.Linq.Expressions.Expression[] parameters
-                )
-            {
-                var callMethod = new System.Dynamic.DynamicMetaObject(
-                    System.Linq.Expressions.Expression.Call(
-                        System.Linq.Expressions.Expression.Convert(Expression, LimitType),
+                Expression[] parameters
+                ) {
+                var callMethod = new DynamicMetaObject(
+                    Expression.Call(
+                                    Expression.Convert(Expression, LimitType),
                         method,
                         parameters),
-                    System.Dynamic.BindingRestrictions.GetTypeRestriction(Expression, LimitType)
+                    BindingRestrictions.GetTypeRestriction(Expression, LimitType)
                     );
                 return callMethod;
             }
 
-
-            public override System.Dynamic.DynamicMetaObject BindGetMember(System.Dynamic.GetMemberBinder binder)
-            {
-                var parameters = new System.Linq.Expressions.Expression[]
-                                     {
-                                         System.Linq.Expressions.Expression.Constant(binder.Name)
-                                     };
-
+            public override DynamicMetaObject BindGetMember(GetMemberBinder binder) {
+                var parameters = new Expression[] {
+                    Expression.Constant(binder.Name)
+                };
 
                 var callMethod = CallMethod(getValueMethod, parameters);
 
-
                 return callMethod;
             }
-
 
             // Needed for Visual basic dynamic support
-            public override System.Dynamic.DynamicMetaObject BindInvokeMember(System.Dynamic.InvokeMemberBinder binder, System.Dynamic.DynamicMetaObject[] args)
-            {
-                var parameters = new System.Linq.Expressions.Expression[]
-                                     {
-                                         System.Linq.Expressions.Expression.Constant(binder.Name)
-                                     };
-
+            public override DynamicMetaObject BindInvokeMember(InvokeMemberBinder binder, DynamicMetaObject[] args) {
+                var parameters = new Expression[] {
+                    Expression.Constant(binder.Name)
+                };
 
                 var callMethod = CallMethod(getValueMethod, parameters);
-
 
                 return callMethod;
             }
 
-
-            public override System.Dynamic.DynamicMetaObject BindSetMember(System.Dynamic.SetMemberBinder binder, System.Dynamic.DynamicMetaObject value)
-            {
-                var parameters = new System.Linq.Expressions.Expression[]
-                                     {
-                                         System.Linq.Expressions.Expression.Constant(binder.Name),
-                                         value.Expression,
-                                     };
-
+            public override DynamicMetaObject BindSetMember(SetMemberBinder binder, DynamicMetaObject value) {
+                var parameters = new Expression[] {
+                    Expression.Constant(binder.Name),
+                    value.Expression,
+                };
 
                 var callMethod = CallMethod(setValueMethod, parameters);
 
-
                 return callMethod;
             }
+
         }
 
-
         private sealed partial class DapperRow
-            : System.Dynamic.IDynamicMetaObjectProvider
-            , IDictionary<string, object>
-        {
+            : IDynamicMetaObjectProvider
+                , IDictionary<string, object> {
+
             readonly DapperTable table;
             object[] values;
 
-
-            public DapperRow(DapperTable table, object[] values)
-            {
-                if (table == null) throw new ArgumentNullException("table");
-                if (values == null) throw new ArgumentNullException("values");
+            public DapperRow(DapperTable table, object[] values) {
+                if (table == null) {
+                    throw new ArgumentNullException("table");
+                }
+                if (values == null) {
+                    throw new ArgumentNullException("values");
+                }
                 this.table = table;
                 this.values = values;
             }
-            private sealed class DeadValue
-            {
-                public static readonly DeadValue Default = new DeadValue();
-                private DeadValue() { }
-            }
-            int ICollection<KeyValuePair<string, object>>.Count
-            {
-                get
-                {
+
+            #region IDictionary<string,object> Members
+
+            int ICollection<KeyValuePair<string, object>>.Count {
+                get {
                     int count = 0;
-                    for (int i = 0; i < values.Length; i++)
-                    {
-                        if (!(values[i] is DeadValue)) count++;
+                    for (int i = 0; i < values.Length; i++) {
+                        if (!(values[i] is DeadValue)) {
+                            count++;
+                        }
                     }
                     return count;
                 }
             }
 
-
-            public bool TryGetValue(string name, out object value)
-            {
+            public bool TryGetValue(string name, out object value) {
                 var index = table.IndexOfName(name);
-                if (index < 0)
-                { // doesn't exist
+                if (index < 0) {
+                    // doesn't exist
                     value = null;
                     return false;
                 }
                 // exists, **even if** we don't have a value; consider table rows heterogeneous
                 value = index < values.Length ? values[index] : null;
-                if (value is DeadValue)
-                { // pretend it isn't here
+                if (value is DeadValue) {
+                    // pretend it isn't here
                     value = null;
                     return false;
                 }
                 return true;
             }
 
-
-            public override string ToString()
-            {
-                var sb = GetStringBuilder().Append("{DapperRow");
-                foreach (var kv in this)
-                {
-                    var value = kv.Value;
-                    sb.Append(", ").Append(kv.Key);
-                    if (value != null)
-                    {
-                        sb.Append(" = '").Append(kv.Value).Append('\'');
-                    }
-                    else
-                    {
-                        sb.Append(" = NULL");
-                    }
-                }
-
-
-                return sb.Append('}').__ToStringRecycle();
-            }
-
-
-            System.Dynamic.DynamicMetaObject System.Dynamic.IDynamicMetaObjectProvider.GetMetaObject(
-                System.Linq.Expressions.Expression parameter)
-            {
-                return new DapperRowMetaObject(parameter, System.Dynamic.BindingRestrictions.Empty, this);
-            }
-
-
-            public IEnumerator<KeyValuePair<string, object>> GetEnumerator()
-            {
+            public IEnumerator<KeyValuePair<string, object>> GetEnumerator() {
                 var names = table.FieldNames;
-                for (var i = 0; i < names.Length; i++)
-                {
+                for (var i = 0; i < names.Length; i++) {
                     object value = i < values.Length ? values[i] : null;
-                    if (!(value is DeadValue))
-                    {
+                    if (!(value is DeadValue)) {
                         yield return new KeyValuePair<string, object>(names[i], value);
                     }
                 }
             }
 
-
-            IEnumerator IEnumerable.GetEnumerator()
-            {
+            IEnumerator IEnumerable.GetEnumerator() {
                 return GetEnumerator();
             }
 
+            #endregion
 
-        #region Implementation of ICollection<KeyValuePair<string,object>>
+            #region IDynamicMetaObjectProvider Members
 
+            DynamicMetaObject IDynamicMetaObjectProvider.GetMetaObject(
+                Expression parameter) {
+                return new DapperRowMetaObject(parameter, BindingRestrictions.Empty, this);
+            }
 
-            void ICollection<KeyValuePair<string, object>>.Add(KeyValuePair<string, object> item)
-            {
+            #endregion
+
+            public override string ToString() {
+                var sb = GetStringBuilder().Append("{DapperRow");
+                foreach (var kv in this) {
+                    var value = kv.Value;
+                    sb.Append(", ").Append(kv.Key);
+                    if (value != null) {
+                        sb.Append(" = '").Append(kv.Value).Append('\'');
+                    }
+                    else {
+                        sb.Append(" = NULL");
+                    }
+                }
+
+                return sb.Append('}').__ToStringRecycle();
+            }
+
+            #region Nested type: DeadValue
+
+            private sealed class DeadValue {
+
+                public static readonly DeadValue Default = new DeadValue();
+
+                private DeadValue() {
+                }
+
+            }
+
+            #endregion
+
+            #region Implementation of ICollection<KeyValuePair<string,object>>
+
+            void ICollection<KeyValuePair<string, object>>.Add(KeyValuePair<string, object> item) {
                 IDictionary<string, object> dic = this;
                 dic.Add(item.Key, item.Value);
             }
 
-
-            void ICollection<KeyValuePair<string, object>>.Clear()
-            { // removes values for **this row**, but doesn't change the fundamental table
-                for (int i = 0; i < values.Length; i++)
+            void ICollection<KeyValuePair<string, object>>.Clear() {
+                // removes values for **this row**, but doesn't change the fundamental table
+                for (int i = 0; i < values.Length; i++) {
                     values[i] = DeadValue.Default;
+                }
             }
 
-
-            bool ICollection<KeyValuePair<string, object>>.Contains(KeyValuePair<string, object> item)
-            {
+            bool ICollection<KeyValuePair<string, object>>.Contains(KeyValuePair<string, object> item) {
                 object value;
                 return TryGetValue(item.Key, out value) && Equals(value, item.Value);
             }
 
-
-            void ICollection<KeyValuePair<string, object>>.CopyTo(KeyValuePair<string, object>[] array, int arrayIndex)
-            {
-                foreach (var kv in this)
-                {
-                    array[arrayIndex++] = kv; // if they didn't leave enough space; not our fault
+            void ICollection<KeyValuePair<string, object>>.CopyTo(KeyValuePair<string, object>[] array, int arrayIndex) {
+                foreach (var kv in this) {
+                    array[arrayIndex++] = kv;// if they didn't leave enough space; not our fault
                 }
             }
 
-
-            bool ICollection<KeyValuePair<string, object>>.Remove(KeyValuePair<string, object> item)
-            {
+            bool ICollection<KeyValuePair<string, object>>.Remove(KeyValuePair<string, object> item) {
                 IDictionary<string, object> dic = this;
                 return dic.Remove(item.Key);
             }
 
-
-            bool ICollection<KeyValuePair<string, object>>.IsReadOnly
-            {
-                get { return false; }
+            bool ICollection<KeyValuePair<string, object>>.IsReadOnly {
+                get {
+                    return false;
+                }
             }
 
+            #endregion
 
-        #endregion
+            #region Implementation of IDictionary<string,object>
 
-
-        #region Implementation of IDictionary<string,object>
-
-
-            bool IDictionary<string, object>.ContainsKey(string key)
-            {
+            bool IDictionary<string, object>.ContainsKey(string key) {
                 int index = table.IndexOfName(key);
-                if (index < 0 || index >= values.Length || values[index] is DeadValue) return false;
+                if (index < 0 || index >= values.Length || values[index] is DeadValue) {
+                    return false;
+                }
                 return true;
             }
 
-
-            void IDictionary<string, object>.Add(string key, object value)
-            {
+            void IDictionary<string, object>.Add(string key, object value) {
                 SetValue(key, value, true);
             }
 
-
-            bool IDictionary<string, object>.Remove(string key)
-            {
+            bool IDictionary<string, object>.Remove(string key) {
                 int index = table.IndexOfName(key);
-                if (index < 0 || index >= values.Length || values[index] is DeadValue) return false;
+                if (index < 0 || index >= values.Length || values[index] is DeadValue) {
+                    return false;
+                }
                 values[index] = DeadValue.Default;
                 return true;
             }
 
-
-            object IDictionary<string, object>.this[string key]
-            {
-                get { object val; TryGetValue(key, out val); return val; }
-                set { SetValue(key, value, false); }
+            object IDictionary<string, object>.this[string key] {
+                get {
+                    object val;
+                    TryGetValue(key, out val);
+                    return val;
+                }
+                set {
+                    SetValue(key, value, false);
+                }
             }
 
-
-            public object SetValue(string key, object value)
-            {
+            public object SetValue(string key, object value) {
                 return SetValue(key, value, false);
             }
-            private object SetValue(string key, object value, bool isAdd)
-            {
-                if (key == null) throw new ArgumentNullException("key");
+
+            private object SetValue(string key, object value, bool isAdd) {
+                if (key == null) {
+                    throw new ArgumentNullException("key");
+                }
                 int index = table.IndexOfName(key);
-                if (index < 0)
-                {
+                if (index < 0) {
                     index = table.AddField(key);
                 }
-                else if (isAdd && index < values.Length && !(values[index] is DeadValue))
-                {
+                else if (isAdd && index < values.Length && !(values[index] is DeadValue)) {
                     // then semantically, this value already exists
                     throw new ArgumentException("An item with the same key has already been added", "key");
                 }
                 int oldLength = values.Length;
-                if (oldLength <= index)
-                {
+                if (oldLength <= index) {
                     // we'll assume they're doing lots of things, and
                     // grow it to the full width of the table
                     Array.Resize(ref values, table.FieldCount);
-                    for (int i = oldLength; i < values.Length; i++)
-                    {
+                    for (int i = oldLength; i < values.Length; i++) {
                         values[i] = DeadValue.Default;
                     }
                 }
                 return values[index] = value;
             }
 
-
-            ICollection<string> IDictionary<string, object>.Keys
-            {
-                get { return this.Select(kv => kv.Key).ToArray(); }
+            ICollection<string> IDictionary<string, object>.Keys {
+                get {
+                    return this.Select(kv => kv.Key).ToArray();
+                }
             }
 
-
-            ICollection<object> IDictionary<string, object>.Values
-            {
-                get { return this.Select(kv => kv.Value).ToArray(); }
+            ICollection<object> IDictionary<string, object>.Values {
+                get {
+                    return this.Select(kv => kv.Value).ToArray();
+                }
             }
 
-
-        #endregion
+            #endregion
         }
 #endif
 
@@ -2918,65 +2988,53 @@ this IDbConnection cnn, string sql, Func<TFirst, TSecond, TThird, TFourth, TRetu
         }
 
 #if !CSHARP30
-        internal static Func<IDataReader, object> GetDapperRowDeserializer(IDataRecord reader, int startBound, int length, bool returnNullIfFirstMissing)
-        {
+        internal static Func<IDataReader, object> GetDapperRowDeserializer(IDataRecord reader,
+                                                                           int startBound,
+                                                                           int length,
+                                                                           bool returnNullIfFirstMissing) {
             var fieldCount = reader.FieldCount;
-            if (length == -1)
-            {
+            if (length == -1) {
                 length = fieldCount - startBound;
             }
 
-
-            if (fieldCount <= startBound)
-            {
+            if (fieldCount <= startBound) {
                 throw MultiMapException(reader);
             }
 
-
             var effectiveFieldCount = Math.Min(fieldCount - startBound, length);
-
 
             DapperTable table = null;
 
-
             return
-                r =>
-                {
-                    if (table == null)
-                    {
+                r => {
+                    if (table == null) {
                         string[] names = new string[effectiveFieldCount];
-                        for (int i = 0; i < effectiveFieldCount; i++)
-                        {
+                        for (int i = 0; i < effectiveFieldCount; i++) {
                             names[i] = r.GetName(i + startBound);
                         }
                         table = new DapperTable(names);
                     }
 
-
                     var values = new object[effectiveFieldCount];
 
-
-                    if (returnNullIfFirstMissing)
-                    {
+                    if (returnNullIfFirstMissing) {
                         values[0] = r.GetValue(startBound);
-                        if (values[0] is DBNull)
-                        {
+                        if (values[0] is DBNull) {
                             return null;
                         }
                     }
 
-
-                    if (startBound == 0)
-                    {
+                    if (startBound == 0) {
                         r.GetValues(values);
-                        for (int i = 0; i < values.Length; i++)
-                            if (values[i] is DBNull) values[i] = null;
+                        for (int i = 0; i < values.Length; i++) {
+                            if (values[i] is DBNull) {
+                                values[i] = null;
+                            }
+                        }
                     }
-                    else
-                    {
+                    else {
                         var begin = returnNullIfFirstMissing ? 1 : 0;
-                        for (var iter = begin; iter < effectiveFieldCount; ++iter)
-                        {
+                        for (var iter = begin; iter < effectiveFieldCount; ++iter) {
                             object obj = r.GetValue(iter + startBound);
                             values[iter] = obj is DBNull ? null : obj;
                         }
@@ -3352,7 +3410,7 @@ this IDbConnection cnn, string sql, Func<TFirst, TSecond, TThird, TFourth, TRetu
 
             il.Emit(OpCodes.Ldarg_0);// stack is now [command]
             il.EmitCall(OpCodes.Callvirt, typeof (IDbCommand).GetProperty("Parameters").GetGetMethod(), null);
-                // stack is now [parameters]
+            // stack is now [parameters]
 
             PropertyInfo[] propsArr = type.GetProperties().Where(p => p.GetIndexParameters().Length == 0).ToArray();
             ConstructorInfo[] ctors = type.GetConstructors();
@@ -3414,7 +3472,7 @@ this IDbConnection cnn, string sql, Func<TFirst, TSecond, TThird, TFourth, TRetu
                     il.Emit(OpCodes.Ldarg_0);// stack is now [parameters] [custom] [command]
                     il.Emit(OpCodes.Ldstr, prop.Name);// stack is now [parameters] [custom] [command] [name]
                     il.EmitCall(OpCodes.Callvirt, prop.PropertyType.GetMethod("AddParameter"), null);
-                        // stack is now [parameters]
+                    // stack is now [parameters]
                     continue;
                 }
                 ITypeHandler handler;
@@ -3429,7 +3487,7 @@ this IDbConnection cnn, string sql, Func<TFirst, TSecond, TThird, TFourth, TRetu
                         il.Emit(OpCodes.Box, prop.PropertyType);// stack is [parameters] [command] [name] [boxed-value]
                     }
                     il.EmitCall(OpCodes.Call, typeof (SqlMapper).GetMethod("PackListParameters"), null);
-                        // stack is [parameters]
+                    // stack is [parameters]
                     continue;
                 }
                 il.Emit(OpCodes.Dup);// stack is now [parameters] [parameters]
@@ -3440,16 +3498,16 @@ this IDbConnection cnn, string sql, Func<TFirst, TSecond, TThird, TFourth, TRetu
                     // need to be a little careful about adding; use a utility method
                     il.Emit(OpCodes.Ldstr, prop.Name);// stack is now [parameters] [parameters] [command] [name]
                     il.EmitCall(OpCodes.Call, typeof (SqlMapper).GetMethod("FindOrAddParameter"), null);
-                        // stack is [parameters] [parameter]
+                    // stack is [parameters] [parameter]
                 }
                 else {
                     // no risk of duplicates; just blindly add
                     il.EmitCall(OpCodes.Callvirt, typeof (IDbCommand).GetMethod("CreateParameter"), null);
-                        // stack is now [parameters] [parameters] [parameter]
+                    // stack is now [parameters] [parameters] [parameter]
 
                     il.Emit(OpCodes.Dup);// stack is now [parameters] [parameters] [parameter] [parameter]
                     il.Emit(OpCodes.Ldstr, prop.Name);
-                        // stack is now [parameters] [parameters] [parameter] [parameter] [name]
+                    // stack is now [parameters] [parameters] [parameter] [parameter] [name]
                     il.EmitCall(OpCodes.Callvirt, typeof (IDataParameter).GetProperty("ParameterName").GetSetMethod(),
                         null);// stack is now [parameters] [parameters] [parameter]
                 }
@@ -3461,37 +3519,37 @@ this IDbConnection cnn, string sql, Func<TFirst, TSecond, TThird, TFourth, TRetu
                     {
                         // look it up from the param value
                         il.Emit(OpCodes.Ldloc_0);
-                            // stack is now [parameters] [[parameters]] [parameter] [parameter] [typed-param]
+                        // stack is now [parameters] [[parameters]] [parameter] [parameter] [typed-param]
                         il.Emit(callOpCode, prop.GetGetMethod());
-                            // stack is [parameters] [[parameters]] [parameter] [parameter] [object-value]
+                        // stack is [parameters] [[parameters]] [parameter] [parameter] [object-value]
                         il.Emit(OpCodes.Call,
                             typeof (SqlMapper).GetMethod("GetDbType", BindingFlags.Static | BindingFlags.Public));
-                            // stack is now [parameters] [[parameters]] [parameter] [parameter] [db-type]
+                        // stack is now [parameters] [[parameters]] [parameter] [parameter] [db-type]
                     }
                     else {
                         // constant value; nice and simple
                         EmitInt32(il, (int) dbType);
-                            // stack is now [parameters] [[parameters]] [parameter] [parameter] [db-type]
+                        // stack is now [parameters] [[parameters]] [parameter] [parameter] [db-type]
                     }
                     il.EmitCall(OpCodes.Callvirt, typeof (IDataParameter).GetProperty("DbType").GetSetMethod(), null);
-                        // stack is now [parameters] [[parameters]] [parameter]
+                    // stack is now [parameters] [[parameters]] [parameter]
                 }
 
                 il.Emit(OpCodes.Dup);// stack is now [parameters] [[parameters]] [parameter] [parameter]
                 EmitInt32(il, (int) ParameterDirection.Input);
-                    // stack is now [parameters] [[parameters]] [parameter] [parameter] [dir]
+                // stack is now [parameters] [[parameters]] [parameter] [parameter] [dir]
                 il.EmitCall(OpCodes.Callvirt, typeof (IDataParameter).GetProperty("Direction").GetSetMethod(), null);
-                    // stack is now [parameters] [[parameters]] [parameter]
+                // stack is now [parameters] [[parameters]] [parameter]
 
                 il.Emit(OpCodes.Dup);// stack is now [parameters] [[parameters]] [parameter] [parameter]
                 il.Emit(OpCodes.Ldloc_0);
-                    // stack is now [parameters] [[parameters]] [parameter] [parameter] [typed-param]
+                // stack is now [parameters] [[parameters]] [parameter] [parameter] [typed-param]
                 il.Emit(callOpCode, prop.GetGetMethod());
-                    // stack is [parameters] [[parameters]] [parameter] [parameter] [typed-value]
+                // stack is [parameters] [[parameters]] [parameter] [parameter] [typed-value]
                 bool checkForNull = true;
                 if (prop.PropertyType.IsValueType) {
                     il.Emit(OpCodes.Box, prop.PropertyType);
-                        // stack is [parameters] [[parameters]] [parameter] [parameter] [boxed-value]
+                    // stack is [parameters] [[parameters]] [parameter] [parameter] [boxed-value]
                     if (Nullable.GetUnderlyingType(prop.PropertyType) == null) {
                         // struct but not Nullable<T>; boxed value cannot be null
                         checkForNull = false;
@@ -3522,7 +3580,7 @@ this IDbConnection cnn, string sql, Func<TFirst, TSecond, TThird, TFourth, TRetu
                     if (prop.PropertyType == typeof (string)) {
                         il.Emit(OpCodes.Dup);// [string] [string]
                         il.EmitCall(OpCodes.Callvirt, typeof (string).GetProperty("Length").GetGetMethod(), null);
-                            // [string] [length]
+                        // [string] [length]
                         EmitInt32(il, DbString.DefaultLength);// [string] [length] [4000]
                         il.Emit(OpCodes.Cgt);// [string] [0 or 1]
                         Label isLong = il.DefineLabel(), lenDone = il.DefineLabel();
@@ -3548,12 +3606,12 @@ this IDbConnection cnn, string sql, Func<TFirst, TSecond, TThird, TFourth, TRetu
 #pragma warning disable 618
                     il.Emit(OpCodes.Call,
                         typeof (TypeHandlerCache<>).MakeGenericType(prop.PropertyType).GetMethod("SetValue"));
-                        // stack is now [parameters] [[parameters]] [parameter]
+                    // stack is now [parameters] [[parameters]] [parameter]
 #pragma warning restore 618
                 }
                 else {
                     il.EmitCall(OpCodes.Callvirt, typeof (IDataParameter).GetProperty("Value").GetSetMethod(), null);
-                        // stack is now [parameters] [[parameters]] [parameter]
+                    // stack is now [parameters] [[parameters]] [parameter]
                 }
 
                 if (prop.PropertyType == typeof (string)) {
@@ -3565,7 +3623,7 @@ this IDbConnection cnn, string sql, Func<TFirst, TSecond, TThird, TFourth, TRetu
                     il.Emit(OpCodes.Dup);// stack is now [parameters] [[parameters]] [parameter] [parameter]
                     il.Emit(OpCodes.Ldloc_1);// stack is now [parameters] [[parameters]] [parameter] [parameter] [size]
                     il.EmitCall(OpCodes.Callvirt, typeof (IDbDataParameter).GetProperty("Size").GetSetMethod(), null);
-                        // stack is now [parameters] [[parameters]] [parameter]
+                    // stack is now [parameters] [[parameters]] [parameter]
 
                     il.MarkLabel(endOfSize);
                 }
@@ -3932,7 +3990,11 @@ this IDbConnection cnn, string sql, Func<TFirst, TSecond, TThird, TFourth, TRetu
             int length,
             bool returnNullIfFirstMissing
 #else
-Type type, IDataReader reader, int startBound = 0, int length = -1, bool returnNullIfFirstMissing = false
+            Type type,
+            IDataReader reader,
+            int startBound = 0,
+            int length = -1,
+            bool returnNullIfFirstMissing = false
 #endif
             ) {
 
@@ -4070,12 +4132,12 @@ Type type, IDataReader reader, int startBound = 0, int length = -1, bool returnN
                                                                                memberType == typeof (char)
                                                                                    ? "ReadChar" : "ReadNullableChar",
                             BindingFlags.Static | BindingFlags.Public), null);
-                            // stack is now [target][target][typed-value]
+                        // stack is now [target][target][typed-value]
                     }
                     else {
                         il.Emit(OpCodes.Dup);// stack is now [target][target][value][value]
                         il.Emit(OpCodes.Isinst, typeof (DBNull));
-                            // stack is now [target][target][value-as-object][DBNull or null]
+                        // stack is now [target][target][value-as-object][DBNull or null]
                         il.Emit(OpCodes.Brtrue_S, isDbNullLabel);// stack is now [target][target][value-as-object]
 
                         // unbox nullable enums as the primitive, i.e. byte etc
@@ -4094,11 +4156,11 @@ Type type, IDataReader reader, int startBound = 0, int length = -1, bool returnN
                                 StoreLocal(il, enumDeclareLocal);// stack is now [target][target]
                                 il.Emit(OpCodes.Ldtoken, unboxType);// stack is now [target][target][enum-type-token]
                                 il.EmitCall(OpCodes.Call, typeof (Type).GetMethod("GetTypeFromHandle"), null);
-                                    // stack is now [target][target][enum-type]
+                                // stack is now [target][target][enum-type]
                                 LoadLocal(il, enumDeclareLocal);// stack is now [target][target][enum-type][string]
                                 il.Emit(OpCodes.Ldc_I4_1);// stack is now [target][target][enum-type][string][true]
                                 il.EmitCall(OpCodes.Call, enumParse, null);
-                                    // stack is now [target][target][enum-as-object]
+                                // stack is now [target][target][enum-as-object]
                                 il.Emit(OpCodes.Unbox_Any, unboxType);// stack is now [target][target][typed-value]
                             }
                             else {
@@ -4127,7 +4189,7 @@ Type type, IDataReader reader, int startBound = 0, int length = -1, bool returnN
 #pragma warning disable 618
                                     il.EmitCall(OpCodes.Call,
                                         typeof (TypeHandlerCache<>).MakeGenericType(unboxType).GetMethod("Parse"), null);
-                                        // stack is now [target][target][typed-value]
+                                    // stack is now [target][target][typed-value]
 #pragma warning restore 618
                                 }
                                 else {
@@ -4152,11 +4214,11 @@ Type type, IDataReader reader, int startBound = 0, int length = -1, bool returnN
                         if (item.Property != null) {
                             if (type.IsValueType) {
                                 il.Emit(OpCodes.Call, DefaultTypeMap.GetPropertySetter(item.Property, type));
-                                    // stack is now [target]
+                                // stack is now [target]
                             }
                             else {
                                 il.Emit(OpCodes.Callvirt, DefaultTypeMap.GetPropertySetter(item.Property, type));
-                                    // stack is now [target]
+                                // stack is now [target]
                             }
                         }
                         else {
@@ -4304,7 +4366,7 @@ Type type, IDataReader reader, int startBound = 0, int length = -1, bool returnN
                 else {
                     il.Emit(OpCodes.Ldtoken, via ?? to);// stack is now [target][target][value][member-type-token]
                     il.EmitCall(OpCodes.Call, typeof (Type).GetMethod("GetTypeFromHandle"), null);
-                        // stack is now [target][target][value][member-type]
+                    // stack is now [target][target][value][member-type]
                     il.EmitCall(OpCodes.Call, typeof (Convert).GetMethod("ChangeType", new Type[] {
                         typeof (object), typeof (Type)
                     }), null);// stack is now [target][target][boxed-member-type-value]
@@ -4526,21 +4588,19 @@ Type type, IDataReader reader, int startBound = 0, int length = -1, bool returnN
 
 #if !CSHARP30
 
-
-    /// <summary>
-    /// Read the next grid of results, returned as a dynamic object
-    /// </summary>
-    /// <remarks>Note: each row can be accessed via "dynamic", or by casting to an IDictionary<string,object></remarks>
-            public IEnumerable<dynamic> Read(bool buffered = true)
-            {
-                return ReadImpl<dynamic>(typeof(DapperRow), buffered);
+            /// <summary>
+            /// Read the next grid of results, returned as a dynamic object
+            /// </summary>
+            /// <remarks>Note: each row can be accessed via "dynamic", or by casting to an IDictionary<string,object></remarks>
+            public IEnumerable<dynamic> Read(bool buffered = true) {
+                return ReadImpl<dynamic>(typeof (DapperRow), buffered);
             }
 #endif
 
 #if CSHARP30
-            /// <summary>
-            /// Read the next grid of results
-            /// </summary>
+    /// <summary>
+    /// Read the next grid of results
+    /// </summary>
             public IEnumerable<T> Read<T>() {
                 return Read<T>(true);
             }
@@ -4610,8 +4670,8 @@ Type type, IDataReader reader, int startBound = 0, int length = -1, bool returnN
                 try {
                     foreach (
                         TReturn r in
-                            SqlMapper.MultiMapImpl<TFirst, TSecond, TThird, TFourth, TFifth, TSixth, TSeventh, TReturn>(
-                                                                                                                        null,
+                            MultiMapImpl<TFirst, TSecond, TThird, TFourth, TFifth, TSixth, TSeventh, TReturn>(
+                                                                                                              null,
                                 default(CommandDefinition), func, splitOn, reader, identity, false)) {
                         yield return r;
                     }
@@ -4622,9 +4682,9 @@ Type type, IDataReader reader, int startBound = 0, int length = -1, bool returnN
             }
 
 #if CSHARP30
-            /// <summary>
-            /// Read multiple objects from a single record set on the grid
-            /// </summary>
+    /// <summary>
+    /// Read multiple objects from a single record set on the grid
+    /// </summary>
             public IEnumerable<TReturn> Read<TFirst, TSecond, TReturn>(Func<TFirst, TSecond, TReturn> func,
                                                                        string splitOn) {
                 return Read<TFirst, TSecond, TReturn>(func, splitOn, true);
@@ -4639,7 +4699,9 @@ Type type, IDataReader reader, int startBound = 0, int length = -1, bool returnN
                                                                        string splitOn,
                                                                        bool buffered)
 #else
-            public IEnumerable<TReturn> Read<TFirst, TSecond, TReturn>(Func<TFirst, TSecond, TReturn> func, string splitOn = "id", bool buffered = true)
+            public IEnumerable<TReturn> Read<TFirst, TSecond, TReturn>(Func<TFirst, TSecond, TReturn> func,
+                                                                       string splitOn = "id",
+                                                                       bool buffered = true)
 #endif
             {
                 IEnumerable<TReturn> result =
@@ -4649,9 +4711,9 @@ Type type, IDataReader reader, int startBound = 0, int length = -1, bool returnN
             }
 
 #if CSHARP30
-            /// <summary>
-            /// Read multiple objects from a single record set on the grid
-            /// </summary>
+    /// <summary>
+    /// Read multiple objects from a single record set on the grid
+    /// </summary>
             public IEnumerable<TReturn> Read<TFirst, TSecond, TThird, TReturn>(
                 Func<TFirst, TSecond, TThird, TReturn> func,
                 string splitOn) {
@@ -4668,7 +4730,10 @@ Type type, IDataReader reader, int startBound = 0, int length = -1, bool returnN
                 string splitOn,
                 bool buffered)
 #else
-            public IEnumerable<TReturn> Read<TFirst, TSecond, TThird, TReturn>(Func<TFirst, TSecond, TThird, TReturn> func, string splitOn = "id", bool buffered = true)
+            public IEnumerable<TReturn> Read<TFirst, TSecond, TThird, TReturn>(
+                Func<TFirst, TSecond, TThird, TReturn> func,
+                string splitOn = "id",
+                bool buffered = true)
 #endif
             {
                 IEnumerable<TReturn> result =
@@ -4678,9 +4743,9 @@ Type type, IDataReader reader, int startBound = 0, int length = -1, bool returnN
             }
 
 #if CSHARP30
-            /// <summary>
-            /// Read multiple objects from a single record set on the grid
-            /// </summary>
+    /// <summary>
+    /// Read multiple objects from a single record set on the grid
+    /// </summary>
             public IEnumerable<TReturn> Read<TFirst, TSecond, TThird, TFourth, TReturn>(
                 Func<TFirst, TSecond, TThird, TFourth, TReturn> func,
                 string splitOn) {
@@ -4697,7 +4762,10 @@ Type type, IDataReader reader, int startBound = 0, int length = -1, bool returnN
                 string splitOn,
                 bool buffered)
 #else
-            public IEnumerable<TReturn> Read<TFirst, TSecond, TThird, TFourth, TReturn>(Func<TFirst, TSecond, TThird, TFourth, TReturn> func, string splitOn = "id", bool buffered = true)
+            public IEnumerable<TReturn> Read<TFirst, TSecond, TThird, TFourth, TReturn>(
+                Func<TFirst, TSecond, TThird, TFourth, TReturn> func,
+                string splitOn = "id",
+                bool buffered = true)
 #endif
             {
                 IEnumerable<TReturn> result =
@@ -4707,28 +4775,42 @@ Type type, IDataReader reader, int startBound = 0, int length = -1, bool returnN
             }
 
 #if !CSHARP30
-    /// <summary>
-    /// Read multiple objects from a single record set on the grid
-    /// </summary>
-            public IEnumerable<TReturn> Read<TFirst, TSecond, TThird, TFourth, TFifth, TReturn>(Func<TFirst, TSecond, TThird, TFourth, TFifth, TReturn> func, string splitOn = "id", bool buffered = true)
-            {
-                var result = MultiReadInternal<TFirst, TSecond, TThird, TFourth, TFifth, DontMap, DontMap, TReturn>(func, splitOn);
-                return buffered ? result.ToList() : result;
-            }
             /// <summary>
             /// Read multiple objects from a single record set on the grid
             /// </summary>
-            public IEnumerable<TReturn> Read<TFirst, TSecond, TThird, TFourth, TFifth, TSixth, TReturn>(Func<TFirst, TSecond, TThird, TFourth, TFifth, TSixth, TReturn> func, string splitOn = "id", bool buffered = true)
-            {
-                var result = MultiReadInternal<TFirst, TSecond, TThird, TFourth, TFifth, TSixth, DontMap, TReturn>(func, splitOn);
+            public IEnumerable<TReturn> Read<TFirst, TSecond, TThird, TFourth, TFifth, TReturn>(
+                Func<TFirst, TSecond, TThird, TFourth, TFifth, TReturn> func,
+                string splitOn = "id",
+                bool buffered = true) {
+                var result = MultiReadInternal<TFirst, TSecond, TThird, TFourth, TFifth, DontMap, DontMap, TReturn>(
+                                                                                                                    func,
+                    splitOn);
                 return buffered ? result.ToList() : result;
             }
+
             /// <summary>
             /// Read multiple objects from a single record set on the grid
             /// </summary>
-            public IEnumerable<TReturn> Read<TFirst, TSecond, TThird, TFourth, TFifth, TSixth, TSeventh, TReturn>(Func<TFirst, TSecond, TThird, TFourth, TFifth, TSixth, TSeventh, TReturn> func, string splitOn = "id", bool buffered = true)
-            {
-                var result = MultiReadInternal<TFirst, TSecond, TThird, TFourth, TFifth, TSixth, TSeventh, TReturn>(func, splitOn);
+            public IEnumerable<TReturn> Read<TFirst, TSecond, TThird, TFourth, TFifth, TSixth, TReturn>(
+                Func<TFirst, TSecond, TThird, TFourth, TFifth, TSixth, TReturn> func,
+                string splitOn = "id",
+                bool buffered = true) {
+                var result = MultiReadInternal<TFirst, TSecond, TThird, TFourth, TFifth, TSixth, DontMap, TReturn>(
+                                                                                                                   func,
+                    splitOn);
+                return buffered ? result.ToList() : result;
+            }
+
+            /// <summary>
+            /// Read multiple objects from a single record set on the grid
+            /// </summary>
+            public IEnumerable<TReturn> Read<TFirst, TSecond, TThird, TFourth, TFifth, TSixth, TSeventh, TReturn>(
+                Func<TFirst, TSecond, TThird, TFourth, TFifth, TSixth, TSeventh, TReturn> func,
+                string splitOn = "id",
+                bool buffered = true) {
+                var result = MultiReadInternal<TFirst, TSecond, TThird, TFourth, TFifth, TSixth, TSeventh, TReturn>(
+                                                                                                                    func,
+                    splitOn);
                 return buffered ? result.ToList() : result;
             }
 #endif
@@ -4802,9 +4884,10 @@ Type type, IDataReader reader, int startBound = 0, int length = -1, bool returnN
         /// <summary>
         /// Used to pass a DataTable as a TableValuedParameter
         /// </summary>
-        public static ICustomQueryParameter AsTableValuedParameter(this DataTable table, string typeName
+        public static ICustomQueryParameter AsTableValuedParameter(this DataTable table,
+                                                                   string typeName
 #if !CSHARP30
-            = null
+                                                                       = null
 #endif
             ) {
             return new TableValuedParameter(table, typeName);
@@ -4996,7 +5079,11 @@ Type type, IDataReader reader, int startBound = 0, int length = -1, bool returnN
             ParameterDirection? direction,
             int? size
 #else
-string name, object value = null, DbType? dbType = null, ParameterDirection? direction = null, int? size = null
+            string name,
+            object value = null,
+            DbType? dbType = null,
+            ParameterDirection? direction = null,
+            int? size = null
 #endif
             ) {
             parameters[Clean(name)] = new ParamInfo() {
@@ -5174,7 +5261,10 @@ string name, object value = null, DbType? dbType = null, ParameterDirection? dir
 #if CSHARP30
         public DynamicParameters Output<T>(T target, Expression<Func<T, object>> expression, DbType? dbType, int? size)
 #else
-        public DynamicParameters Output<T>(T target, Expression<Func<T, object>> expression, DbType? dbType = null, int? size = null)
+        public DynamicParameters Output<T>(T target,
+                                           Expression<Func<T, object>> expression,
+                                           DbType? dbType = null,
+                                           int? size = null)
 #endif
         {
             string failMessage = "Expression must be a property/field chain off of a(n) {0} instance";
@@ -5762,7 +5852,7 @@ string name, object value = null, DbType? dbType = null, ParameterDirection? dir
 
                 int i = 0;
                 for (; i < ctorParameters.Length; i++) {
-                    if (!String.Equals(ctorParameters[i].Name, names[i], StringComparison.OrdinalIgnoreCase)) {
+                    if (!string.Equals(ctorParameters[i].Name, names[i], StringComparison.OrdinalIgnoreCase)) {
                         break;
                     }
                     if (types[i] == typeof (byte[]) && ctorParameters[i].ParameterType.FullName == SqlMapper.LinqBinary) {
